@@ -201,45 +201,44 @@ def _county_key(name: str) -> str:
 
 
 def load_zip_data(db: sqlite3.Connection):
-    """Load ZCTA -> county rows. Downloads the Census file; falls back to sample."""
+    """Load ZCTA -> county rows from the Census 2020 relationship file.
+
+    File layout (pipe-delimited, first line is a header):
+      col 0  OID_ZCTA5_20        (may be blank)
+      col 1  GEOID_ZCTA5_20      5-digit ZCTA  <-- the ZIP
+      col 9  GEOID_COUNTY_20     5-digit county GEOID (state FIPS + county FIPS)
+      col 10 NAMELSAD_COUNTY_20  e.g. 'Los Angeles County'
+    Rows with a blank ZCTA are county-total lines and are skipped.
+    """
     rows = []
     try:
-        resp = requests.get(ZCTA_COUNTY_URL, timeout=60,
+        resp = requests.get(ZCTA_COUNTY_URL, timeout=120,
                             headers={"User-Agent": USER_AGENT})
         resp.raise_for_status()
-        # Format: ZCTA5 | STATE | COUNTY (pipe-separated, GEOID in col 2)
         for line in resp.text.splitlines():
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 3 or not parts[0].isdigit():
+            if len(parts) < 11:
                 continue
-            zcta, geoid = parts[0], parts[1]          # 06110 | 06037 | ...
-            if len(zcta) != 5 or len(geoid) != 5:
+            zcta, geoid, county_name = parts[1], parts[9], parts[10]
+            if not zcta.isdigit() or len(zcta) != 5 or len(geoid) != 5:
                 continue
-            rows.append((zcta[:5].lstrip("0") or "0", geoid[:2], geoid[2:]))
+            rows.append((zcta, geoid[:2], geoid[2:], county_name))
     except Exception as exc:  # offline / blocked -> sample data
-        rows = None
+        rows = []
         print("ZIP crosswalk download failed ({}), using sample ZIPs".format(exc))
 
-    if not rows:  # download gave nothing useful
-        rows = None
-
-    if rows is None:
+    if not rows:
         for zc, st, county in SAMPLE_ZIPS:
             cid = _ensure_county(db, st, county)
             db.execute("INSERT OR IGNORE INTO zips VALUES (?,?,?)", (zc, st, cid))
         db.commit()
         return
 
-    # Map FIPS state/county codes to names using Census gazetteer of counties.
-    counties = _fetch_county_names()
-    for zc, state_fips, county_fips in rows:
-        name = counties.get((state_fips, county_fips))
-        if name is None:
-            continue
+    for zc, state_fips, county_fips, county_name in rows:
         st = FIPS_STATE.get(state_fips)
         if st is None:
             continue
-        cid = _ensure_county(db, st, name)
+        cid = _ensure_county(db, st, county_name)
         db.execute("INSERT OR IGNORE INTO zips VALUES (?,?,?)", (zc, st, cid))
     db.commit()
 
@@ -682,4 +681,4 @@ bootstrap()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)#trial
+    app.run(host="0.0.0.0", port=port, debug=False)
