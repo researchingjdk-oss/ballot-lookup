@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ballot-lookup
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.9
