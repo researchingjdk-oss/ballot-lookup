@@ -1,0 +1,13 @@
+name: ballot-refresh
+on:
+  workflow_dispatch: {}   # adds a "Run workflow" button
+  schedule:
+    - cron: "0 6 * * *"
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -sS -X POST "$URL/admin/refresh?zip=90210&token=$TOKEN"
+        env:
+          URL: https://YOUR-APP.onrender.com
+          TOKEN: ${{ secrets.ADMIN_TOKEN }}
